@@ -81,3 +81,11 @@ def save_message(session_id, user_text, sentiment_data, bot_reply):
     c.execute('UPDATE sessions SET history = ? WHERE id = ?', 
               (json.dumps(current_history), session_id))
     conn.commit()
+    conn.close()
+
+def rename_session(session_id, new_title):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute('UPDATE sessions SET title = ? WHERE id = ?', (new_title, session_id))
+    conn.commit()
+    conn.close()

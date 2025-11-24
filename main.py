@@ -1,7 +1,8 @@
-# Filename: main.py
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 from gemini_bot import SentimentChatbot
 import database
+import io
+import json
 
 app = Flask(__name__)
 
@@ -74,6 +75,87 @@ def report():
         'trend': report_data['trend'],
         'summary': report_data['summary']
     })
+
+@app.route('/download_report/<file_format>', methods=['GET'])
+def download_report(file_format):
+    
+    session_id = request.args.get('session_id')
+    session_title = "Current_Session"
+    
+    if session_id:
+        all_sessions = database.get_all_sessions()
+        for sess in all_sessions:
+            if sess['id'] == session_id:
+                session_title = sess['title']
+                break
+
+    safe_filename = "".join([c for c in session_title if c.isalnum() or c in (' ', '-', '_', '.')]).strip()
+    safe_filename = safe_filename.replace(" ", "_")
+    
+    if not safe_filename:
+        safe_filename = "Session_Report"
+
+    report_data = bot.generate_executive_summary()
+    insight = report_data.get('summary', {})
+    
+    summary_text = insight.get('summary', 'N/A')
+    emotion = insight.get('Summarised emotion of chat', 'N/A')
+    score = insight.get('sentiment_score', 'N/A')
+
+    chat_log = []
+    for entry in bot.conversation_history:
+        log_entry = {
+            "user_message": entry['text'],
+            "sentiment": entry['sentiment']['label'],
+            "score": entry['sentiment']['score'],
+            "emotion": entry['sentiment']['emotion']
+        }
+        chat_log.append(log_entry)
+
+    if file_format == 'json':
+        export_obj = {
+            "session_name": session_title,
+            "report_type": "Detailed Sentiment Audit",
+            "analytics": {
+                "overall_review": report_data['sentiment'],
+                "conversation_flow": report_data['trend'],
+                "dominant_emotion": emotion,
+                "average_score": score,
+                "executive_summary": summary_text
+            },
+            "transcript_analysis": chat_log
+        }
+        
+        mem = io.BytesIO()
+        mem.write(json.dumps(export_obj, indent=4).encode('utf-8'))
+        mem.seek(0)
+        return send_file(mem, as_attachment=True, download_name=f'{safe_filename}_report.json', mimetype='application/json')
+
+    elif file_format == 'txt':
+        lines = [
+            "SENTIMENT AUDIT REPORT",
+            f"Session Name: {session_title}",
+            "",
+            "EXECUTIVE SUMMARY",
+            f"Overall Review:    {report_data['sentiment']}",
+            f"Conversation Flow: {report_data['trend']}",
+            f"Dominant Emotion:  {emotion} (Avg Score: {score})",
+            f"Summary:           {summary_text}",
+            "",
+            "TRANSCRIPT ANALYSIS"
+        ]
+        
+        for i, log in enumerate(chat_log, 1):
+            lines.append(f"{i}. User: {log['user_message']}")
+            lines.append(f"   Analysis: {log['sentiment']} | {log['emotion']} ({log['score']:.2f})")
+            lines.append("") 
+            
+        mem = io.BytesIO()
+        mem.write("\n".join(lines).encode('utf-8'))
+        mem.seek(0)
+        return send_file(mem, as_attachment=True, download_name=f'{safe_filename}_report.txt', mimetype='text/plain')
+
+    return "Invalid format", 400
 
 if __name__ == '__main__':
     print("Starting Web Server at http://127.0.0.1:5000")
